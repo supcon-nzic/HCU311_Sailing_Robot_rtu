@@ -1,0 +1,2 @@
+# HCU311_Sailing_Robot_rtu
+这是宁波中控微电子开发的无人帆船HCU和RTU共同控制程序中的HCU程序
