@@ -134,7 +134,7 @@ class Client_tcp():
         self.sail_pwm = struct.pack('>H',self.DutyRatio_sail)
         #rospy.logwarn('tooo'+str(self.rudder_pwm)
         #rospy.logwarn(self.sail_pwm)
-        data_send = frame_start + self.rudder_pwm + self.sail_pwm
+        data_send = frame_start + self.sail_pwm + self.rudder_pwm    #change the position of rudder and sail
         crc_send =  CRC16.RTUCRC_16(data_send[2:6], 4)
         crc_send = struct.pack('>H',crc_send)
         self.send_data =bytearray(data_send+crc_send)
