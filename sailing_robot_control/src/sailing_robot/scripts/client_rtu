@@ -106,8 +106,8 @@ class Client_tcp():
                 else:
                     i = i + 1
                     
-            self.msg_position.latitude = self.latitude[0] * 1.0 / 10000000
-            self.msg_position.longitude = self.longitude[0] * 1.0 / 10000000
+            self.msg_position.latitude = self.longitude[0] * 1.0 / 10000000        #exchange longitude and latitude 
+            self.msg_position.longitude = self.latitude[0] * 1.0 / 10000000
             self.heading = 360 - self.unpack_heading[0]                            #the direction of IMU  and  location are the same
             self.wind_direction_apparent = self.unpack_wind_direction[0]/3890.0*360
             if self.wind_direction_apparent >360:
