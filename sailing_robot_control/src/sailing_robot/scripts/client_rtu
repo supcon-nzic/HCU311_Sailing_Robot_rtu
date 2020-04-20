@@ -1,0 +1,145 @@
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+# Simulator for the boat position based on velocity and heading
+
+
+import rospy
+from std_msgs.msg import Float64, Float32, String, Int16
+from sensor_msgs.msg import NavSatFix
+import socket
+import struct
+import CRC16
+import time,os,sys
+
+rudderdata = rospy.get_param('rudder')
+rudderservo_PWM_offset = rudderdata['PWMoffset']
+rudderservo_lower_limits = rudderdata['servolowerlimits']
+rudderservo_higher_limits = rudderdata['servohigherlimits']
+rudderservo_netural_point = (rudderservo_lower_limits + rudderservo_higher_limits) / 2
+rudderservo_range = (rudderservo_higher_limits - rudderservo_lower_limits)
+
+minPWM = rospy.get_param('sail/servolowerlimits')
+maxPWM = rospy.get_param('sail/servohigherlimits')
+
+
+class Client_tcp():
+    def __init__(self):
+        
+        rospy.init_node("client_rtu", anonymous = True)
+        # topics
+        rospy.Subscriber('rudder_control', Int16, self.rudderservoPWMcontrol)
+        rospy.Subscriber('sailsheet_normalized', Float32, self.sail_servo_update)
+
+        self.heading_pub = rospy.Publisher('heading', Float32, queue_size=10)
+        self.wind_direction_apparent_pub = rospy.Publisher(
+            "wind_direction_apparent", Float64, queue_size=10)
+        self.pos_pub = rospy.Publisher('position', NavSatFix, queue_size=10)
+        
+        self.heading = Float32()
+        self.wind_direction_apparent = Float32()
+        self.msg_position = NavSatFix()
+        self.latitude = 0
+        self.longitude = 0       
+        self.rudder_pwm = 1500
+        self.sail_pwm = 1500
+        self.DutyRatio_rudder = 0
+        self.DutyRatio_sail = 0
+        self.client_tcp_send()
+
+    def rudderservoPWMcontrol(self, msg):
+        self.degree = msg.data
+        self.pwm = rudderservo_range * (-1.0 * self.degree) / 90 + rudderservo_netural_point + rudderservo_PWM_offset
+        self.DutyRatio_rudder = self.pwm * 100 / 20000000*1000*100
+        rospy.logwarn('duty_rudder'+str(self.DutyRatio_rudder))
+      
+    def sail_servo_update(self, msg):
+        self.sheetPWM = (msg.data * (maxPWM - minPWM)) + minPWM
+        self.DutyRatio_sail = self.sheetPWM * 100 / 20000000*1000*100 
+
+    def doConnect(self,host,port):
+        mySocket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        mySocket.settimeout(10)
+        try:
+            mySocket.connect((host,port))
+        except:
+            pass
+        return mySocket
+
+    def client_tcp_send(self):
+
+        self.rate = rospy.Rate(20)
+        host = "192.168.1.1"
+        port = 17973
+
+        data = bytearray()
+        data_send = bytearray()
+
+        sockLocal = self.doConnect(host,port)
+        while not rospy.is_shutdown():
+            try:
+                self.TCP_RTU_Reply()
+                sockLocal.send(self.send_data)
+                data = sockLocal.recv(1024)
+            except socket.error:
+                print"\r\nsocket error, do reconnect"
+                time.sleep(1)
+                sockLocal = self.doConnect(host,port)
+            except:
+                print"\r\nother error occor"
+                time.sleep(3)
+           # time.sleep(1)
+
+            data_len = len(data)
+            i = 0
+            while(i <= data_len - 16):
+                if(ord(data[i]) == 0xAA and ord(data[i+1]) == 0x55):
+                    crc_check = CRC16.RTUCRC_16(data[i+2:i+14], 12)
+                    crc_data = struct.unpack('>H', data[i+14:i+16])
+                    if(crc_data[0] == crc_check):
+                        self.unpack_heading = struct.unpack('>H', data[i+2:i+4])
+                        self.unpack_wind_direction = struct.unpack('>H', data[i+4:i+6])
+                        self.latitude = struct.unpack('>I',data[i+6:i+10])
+                        self.longitude = struct.unpack('>I',data[i+10:i+14])
+                        i = i + 16
+                    else:
+                        i = i + 1
+                else:
+                    i = i + 1
+                    
+            self.msg_position.latitude = self.latitude[0] * 1.0 / 10000000
+            self.msg_position.longitude = self.longitude[0] * 1.0 / 10000000
+            self.heading = self.unpack_heading[0]
+            self.wind_direction_apparent = self.unpack_wind_direction[0]/3890*360
+            if self.wind_direction_apparent >360:
+                self.wind_direction_apparent = 360
+  
+            '''
+            print(self.msg_position.latitude)
+            print(self.msg_position.longitude)
+            print(hex(self.heading))
+            print(self.wind_direction_apparent)
+            '''
+            self.msgs_publisher()
+            self.rate.sleep()
+
+    def msgs_publisher(self):
+        self.heading_pub.publish(self.heading)
+        self.wind_direction_apparent_pub.publish(self.wind_direction_apparent)
+        self.pos_pub.publish(self.msg_position)
+    def TCP_RTU_Reply(self):
+        frame_start = struct.pack('>H', 0xAA54)
+        #DutyRatio_rudder = struct.pack('>H',500) 
+        #DutyRatio_sail = struct.pack('>H',600) 
+        self.rudder_pwm = struct.pack('>H',self.DutyRatio_rudder) 
+        self.sail_pwm = struct.pack('>H',self.DutyRatio_sail)
+        #rospy.logwarn('tooo'+str(self.rudder_pwm)
+        #rospy.logwarn(self.sail_pwm)
+        data_send = frame_start + self.rudder_pwm + self.sail_pwm
+        crc_send =  CRC16.RTUCRC_16(data_send[2:6], 4)
+        crc_send = struct.pack('>H',crc_send)
+        self.send_data =bytearray(data_send+crc_send)
+if __name__ == '__main__':
+    try:
+        Client_tcp()
+    except rospy.ROSInterruptException:
+        pass
