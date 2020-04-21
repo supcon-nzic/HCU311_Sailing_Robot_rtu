@@ -48,7 +48,7 @@ class Client_tcp():
 
     def rudderservoPWMcontrol(self, msg):
         self.degree = msg.data
-        self.pwm = rudderservo_range * (-1.0 * self.degree) / 90 + rudderservo_netural_point + rudderservo_PWM_offset
+        self.pwm = rudderservo_range * (1.0 * self.degree) / 90 + rudderservo_netural_point + rudderservo_PWM_offset    # origin -1 to now 1
         self.DutyRatio_rudder = self.pwm * 100 / 20000000*1000*100
         rospy.logwarn('duty_rudder'+str(self.DutyRatio_rudder))
       
